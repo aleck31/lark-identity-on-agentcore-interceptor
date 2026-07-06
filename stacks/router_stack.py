@@ -23,7 +23,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-from stacks import retention_days
+from stacks import retention_days, lambda_asset
 
 
 class RouterStack(Stack):
@@ -77,7 +77,7 @@ class RouterStack(Stack):
             function_name=fn_name,
             runtime=_lambda.Runtime.PYTHON_3_13,
             handler="index.handler",
-            code=_lambda.Code.from_asset("lambda/router"),
+            code=lambda_asset("lambda/router"),
             timeout=Duration.seconds(timeout),
             memory_size=memory,
             environment={
