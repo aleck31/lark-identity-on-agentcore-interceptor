@@ -25,18 +25,24 @@ A reference implementation of enterprise identity on Amazon Bedrock AgentCore, u
                                        │ MCP call, Bearer = user's Cognito ACCESS token
                                        ▼
                              ┌───────────────────┐
-                             │ AgentCore Gateway │  customJWTAuthorizer (Cognito, allowedClients)
-                             │  + Interceptor λ  │  passRequestHeaders=true
-                             │                   │  reads identity from JWT → injects per-tenant
-                             │                   │  downstream key (Secrets Manager) + end-user id
-                             └─────────┬─────────┘  → demo whoami tool (proves pass-through)
+                             │ AgentCore Gateway │  MCP server; customJWTAuthorizer (Cognito)
+                             │  + Interceptor λ  │  passRequestHeaders=true; injects end-user id
+                             └─────────┬─────────┘  (Gateway invokes its Lambda target, not Lark)
                                        ▼
-                                  downstream MCP tool (agent never holds the key)
+                             ┌───────────────────┐  whoami — identity proof
+                             │   Tool Lambda     │  list_my_docs — loads THIS user's Lark
+                             └─────────┬─────────┘  user_access_token (Secrets Manager, by open_id)
+                                       │ HTTPS, Bearer = user_access_token
+                                       ▼
+                                  Lark REST API  → returns only what THIS user can see
 
-  Identity: both entrypoints resolve to  lark:{open_id}  (shared session/workspace).
-  Lark is NOT standard OIDC → web_api exchanges the login code for a Cognito JWT
-  the API Gateway + AgentCore Gateway authorizers can verify.
+  Identity: both entrypoints resolve to  lark:{open_id}  (shared session/memory).
+  Lark is NOT standard OIDC → web_api exchanges the login code for a Cognito JWT.
+  Pass-through (whoami) proves WHO; inheritance (list_my_docs, user_access_token)
+  means the agent can only reach what the user can — Lark adjudicates.
 ```
+
+See **[docs/architecture.md](docs/architecture.md)** for the full layered design, per-hop auth matrix, and sequence diagrams.
 
 ## Layout
 
@@ -48,9 +54,10 @@ A reference implementation of enterprise identity on Amazon Bedrock AgentCore, u
 | `lambda/router/` | Lark webhook: verify/decrypt/tenant-token/send |
 | `lambda/web_api/` | Lark login exchange + session bootstrap (presigned WSS) |
 | `lambda/interceptor/` | Gateway Request Interceptor (per-user credential injection) |
-| `lambda/tools/` | demo `whoami` MCP tool target |
+| `lambda/tools/` | MCP tool targets: `whoami` (identity proof) + `list_my_docs` (acts as the user against Lark) |
 | `web-ui/` | Lark-embedded SPA (no build step) |
 | `scripts/` | deploy / setup-lark / manage-allowlist / test |
+| `docs/architecture.md` | Full architecture: layers, per-hop auth, sequence diagrams |
 
 ## Deploy
 
@@ -113,6 +120,7 @@ All four goals verified end-to-end on an AWS account:
   the identity and injects the per-tenant downstream key → the `whoami` tool reports the real end-user id and that a credential was injected, **while the agent never holds the key**.
 - ✅ **Conversation memory**: the agent is a Strands agent with an AgentCore Memory (STM) session manager keyed by `(actor_id, session)`.
   Verified across two *different* runtime sessions for the same user: it recalls a fact stated earlier — so memory persists across reconnects and both entrypoints (30-day event retention).
+- ✅ **Permission inheritance**: after the user authorizes in the web app, the `list_my_docs` tool acts *as* that user — it loads the user's Lark `user_access_token` (stored by open_id, refreshed on expiry) and calls the Lark drive API, returning **only the documents that user can see in Lark**. Verified end-to-end: the agent returned the user's real Lark folder, scoped by Lark's own permission check, while never holding the user's Lark token.
 
 ### Build & deploy notes (learned the hard way)
 
