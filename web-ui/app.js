@@ -22,16 +22,24 @@
   var elSend = document.getElementById("send");
   var elForm = document.getElementById("composer");
 
-  var state = { idToken: null, actorId: null, displayName: null, ws: null, currentBot: null };
+  var state = { idToken: null, actorId: null, displayName: null, ws: null, currentBot: null, botRaw: "" };
 
   function setStatus(text, cls) {
     elStatus.textContent = text;
     elStatus.className = "status" + (cls ? " " + cls : "");
   }
+  // Markdown for agent replies only; sanitize since agent output is untrusted.
+  // Falls back to plain text if marked/DOMPurify didn't load.
+  var mdReady = window.marked && window.DOMPurify;
+  function renderMarkdown(el, raw) {
+    if (!mdReady) { el.textContent = raw; return; }
+    el.innerHTML = window.DOMPurify.sanitize(window.marked.parse(raw));
+  }
   function addMsg(text, kind) {
     var d = document.createElement("div");
     d.className = "msg " + kind;
-    d.textContent = text;
+    if (kind === "bot" && mdReady) { d.classList.add("md"); renderMarkdown(d, text); }
+    else d.textContent = text;
     elChat.appendChild(d);
     elChat.scrollTop = elChat.scrollHeight;
     return d;
@@ -133,8 +141,11 @@
         var frame;
         try { frame = JSON.parse(ev.data); } catch (e) { return; }
         if (frame.type === "delta") {
-          if (!state.currentBot) state.currentBot = addMsg("", "bot");
-          state.currentBot.textContent += frame.text;
+          if (!state.currentBot) { state.currentBot = addMsg("", "bot"); state.botRaw = ""; }
+          state.botRaw += frame.text;
+          // Re-render the accumulated markdown each delta (plain-text fallback inside).
+          if (state.currentBot.classList.contains("md")) renderMarkdown(state.currentBot, state.botRaw);
+          else state.currentBot.textContent = state.botRaw;
           elChat.scrollTop = elChat.scrollHeight;
         } else if (frame.type === "final") {
           state.currentBot = null;
