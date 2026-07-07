@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(not WS_URL, reason="set WS_URL from POST /api/se
 async def _chat_once(ws_url: str, actor_id: str, message: str) -> str:
     import websockets  # imported lazily so the file collects without the dep
     collected = []
-    async with websockets.connect(ws_url, max_size=32 * 1024) as ws:
+    async with websockets.connect(ws_url, max_size=64 * 1024) as ws:  # AgentCore WS frame limit is 64 KB
         await ws.send(json.dumps({"type": "chat", "actorId": actor_id, "message": message}))
         while True:
             frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=60))

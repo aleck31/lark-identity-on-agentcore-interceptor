@@ -60,34 +60,46 @@
     });
   }
 
-  // --- steps 2-3: exchange code -> JWT -> session ------------------------
-  function authAndSession(code) {
-    return fetch(API + "/api/lark/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: code }),
-    })
+  // --- step 2: Lark login code -> fresh Cognito JWT ----------------------
+  // Reusable so reconnect can re-mint a JWT (the Cognito idToken expires in ~1h;
+  // Lark 免登 is silent since the user is already signed into the Lark client).
+  function authenticate() {
+    return getLarkCode()
+      .then(function (code) {
+        return fetch(API + "/api/lark/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: code }),
+        });
+      })
       .then(function (r) { if (!r.ok) throw new Error("auth failed " + r.status); return r.json(); })
       .then(function (auth) {
         state.idToken = auth.idToken;
         state.actorId = auth.actorId;
         state.displayName = auth.name || auth.actorId;
-        return fetch(API + "/api/session", {
-          method: "POST",
-          headers: { Authorization: "Bearer " + auth.idToken },
-        });
-      })
-      .then(function (r) { if (!r.ok) throw new Error("session failed " + r.status); return r.json(); });
+        return auth;
+      });
   }
 
-  // Refresh just the WSS URL for an already-authenticated user. The presigned
-  // URL expires after 5 min and the connection idles out, so we re-fetch it
-  // on demand rather than keeping a heartbeat running.
+  // --- step 3: create/refresh a session (WSS URL) ------------------------
+  function createSession() {
+    return fetch(API + "/api/session", {
+      method: "POST", headers: { Authorization: "Bearer " + state.idToken },
+    }).then(function (r) {
+      if (!r.ok) throw new Error("session failed " + r.status);
+      return r.json();
+    });
+  }
+
+  // Get a fresh WSS URL for reconnect. If the stored JWT has expired (401),
+  // silently re-authenticate via Lark and retry once.
   function refreshSession() {
     return fetch(API + "/api/session", {
-      method: "GET",
-      headers: { Authorization: "Bearer " + state.idToken },
+      method: "GET", headers: { Authorization: "Bearer " + state.idToken },
     }).then(function (r) {
+      if (r.status === 401) {
+        return authenticate().then(createSession);  // token expired → re-login
+      }
       if (!r.ok) throw new Error("session refresh failed " + r.status);
       return r.json();
     });
@@ -169,8 +181,8 @@
       return;
     }
     setStatus("authenticating…");
-    getLarkCode()
-      .then(authAndSession)
+    authenticate()
+      .then(createSession)
       .then(function (session) {
         setStatus("connected as " + state.displayName, "ok");
         return connectWs(session.wsUrl);

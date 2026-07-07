@@ -83,7 +83,7 @@ async def handle_invocations(request: web.Request) -> web.Response:
 # ----------------------------- WebSocket path -------------------------------
 
 async def handle_ws(request: web.Request) -> web.WebSocketResponse:
-    ws = web.WebSocketResponse(max_msg_size=32 * 1024)
+    ws = web.WebSocketResponse(max_msg_size=64 * 1024)  # AgentCore WS frame limit is 64 KB
     await ws.prepare(request)
     log.info("ws client connected")
 
