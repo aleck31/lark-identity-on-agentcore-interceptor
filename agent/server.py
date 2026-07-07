@@ -148,6 +148,9 @@ def build_http_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/ping", handle_ping)
     app.router.add_post("/invocations", handle_invocations)
+    # AgentCore bridges browser WSS to /ws on THIS port (8080), matching the
+    # official SDK contract (Route /invocations + WebSocketRoute /ws).
+    app.router.add_get("/ws", handle_ws)
     return app
 
 

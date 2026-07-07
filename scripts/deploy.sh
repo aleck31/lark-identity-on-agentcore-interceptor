@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Deploy lark-agent end to end. Always uses the `lab` profile / us-west-2.
+# Deploy lark-agent. Override the target with PROFILE=... REGION=... env vars.
 #
-# Phases (idempotent — re-runnable):
-#   1. CDK base stacks (security, agentcore, router, webui, gateway, observability)
-#   2. Create/update the AgentCore Runtime from the built image  (control-plane CLI)
-#   3. Create/update the MCP Gateway + interceptor + demo target  (control-plane CLI)
-#   4. Re-deploy CDK so lambdas get the real runtime ARN; inject SPA config; upload SPA
+# Steps (idempotent — re-runnable independently):
+#   --base      CDK base stacks (security, agentcore, router, gateway, observability)
+#   --runtime   create/update the AgentCore Runtime from the built image (CLI)
+#   --gateway   create/update the MCP Gateway + interceptor + demo target (CLI)
+#   --frontend  deploy the WebUI stack, inject SPA config, upload the SPA
+#   (no arg)    run all steps in order
 #
-# Usage: scripts/deploy.sh [--phase1|--runtime|--gateway|--frontend]
+# Usage: [PROFILE=p REGION=r] scripts/deploy.sh [--base|--runtime|--gateway|--frontend]
 set -euo pipefail
 
-PROFILE="${PROFILE:-lab}"
+PROFILE="${PROFILE:-default}"
 REGION="${REGION:-us-west-2}"
 PREFIX="lark-agent"
 export AWS_PROFILE="$PROFILE" AWS_REGION="$REGION" UV_LINK_MODE=copy
@@ -39,8 +40,8 @@ print(f"cdk.json: {k} = {v}")
 PY
 }
 
-phase1_cdk_base() {
-  log "Phase 1 — CDK base stacks"
+base_cdk_stacks() {
+  log "Base — CDK stacks"
   $CDK deploy "$PREFIX-security" "$PREFIX-agentcore" "$PREFIX-router" \
              "$PREFIX-gateway" "$PREFIX-observability" \
              --require-approval never --outputs-file cdk.out/outputs.json
@@ -169,10 +170,10 @@ phase4_frontend() {
 }
 
 case "${1:-all}" in
-  --phase1)   phase1_cdk_base ;;
+  --base|--phase1) base_cdk_stacks ;;  # --phase1 kept as a back-compat alias
   --runtime)  phase2_runtime ;;
   --gateway)  phase3_gateway ;;
   --frontend) phase4_frontend ;;
-  all|"")     phase1_cdk_base; phase2_runtime; phase3_gateway; phase4_frontend ;;
-  *) echo "usage: $0 [--phase1|--runtime|--gateway|--frontend]"; exit 1 ;;
+  all|"")     base_cdk_stacks; phase2_runtime; phase3_gateway; phase4_frontend ;;
+  *) echo "usage: [PROFILE=p REGION=r] $0 [--base|--runtime|--gateway|--frontend]"; exit 1 ;;
 esac

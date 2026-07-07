@@ -6,7 +6,7 @@
 #   scripts/manage-allowlist.sh list
 set -euo pipefail
 
-PROFILE="${PROFILE:-lab}"
+PROFILE="${PROFILE:-default}"
 REGION="${REGION:-us-west-2}"
 TABLE="lark-agent-identity"
 export AWS_PROFILE="$PROFILE" AWS_REGION="$REGION"

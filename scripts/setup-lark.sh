@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Read Lark credentials from .env and write them to Secrets Manager. Optionally
-# allowlist your open_id. Uses the `lab` profile / us-west-2.
+# allowlist your open_id. Override target with PROFILE=... REGION=... env vars.
 #
 # Prereqs (Lark developer console):
 #   1. Self-built app with "Bot" + "Web app" capabilities.
@@ -15,7 +15,7 @@
 # `scripts/deploy.sh --frontend` so the App ID is injected into the SPA.
 set -euo pipefail
 
-PROFILE="${PROFILE:-lab}"
+PROFILE="${PROFILE:-default}"
 REGION="${REGION:-us-west-2}"
 PREFIX="lark-agent"
 export AWS_PROFILE="$PROFILE" AWS_REGION="$REGION"

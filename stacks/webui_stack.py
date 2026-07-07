@@ -98,6 +98,9 @@ class WebUiStack(Stack):
             actions=[
                 "bedrock-agentcore:InvokeAgentRuntime",
                 "bedrock-agentcore:InvokeAgentRuntimeForUser",
+                # the browser's presigned WSS URL is signed with this role, and
+                # the WebSocket upgrade authorizes this dedicated action
+                "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
             ],
             resources=[runtime_arn, f"{runtime_arn}/*"],
         ))

@@ -22,7 +22,7 @@
   var elSend = document.getElementById("send");
   var elForm = document.getElementById("composer");
 
-  var state = { idToken: null, actorId: null, ws: null, currentBot: null };
+  var state = { idToken: null, actorId: null, displayName: null, ws: null, currentBot: null };
 
   function setStatus(text, cls) {
     elStatus.textContent = text;
@@ -71,12 +71,26 @@
       .then(function (auth) {
         state.idToken = auth.idToken;
         state.actorId = auth.actorId;
+        state.displayName = auth.name || auth.actorId;
         return fetch(API + "/api/session", {
           method: "POST",
           headers: { Authorization: "Bearer " + auth.idToken },
         });
       })
       .then(function (r) { if (!r.ok) throw new Error("session failed " + r.status); return r.json(); });
+  }
+
+  // Refresh just the WSS URL for an already-authenticated user. The presigned
+  // URL expires after 5 min and the connection idles out, so we re-fetch it
+  // on demand rather than keeping a heartbeat running.
+  function refreshSession() {
+    return fetch(API + "/api/session", {
+      method: "GET",
+      headers: { Authorization: "Bearer " + state.idToken },
+    }).then(function (r) {
+      if (!r.ok) throw new Error("session refresh failed " + r.status);
+      return r.json();
+    });
   }
 
   // --- step 4: WebSocket chat --------------------------------------------
@@ -86,7 +100,12 @@
       var opened = false;
       ws.onopen = function () { opened = true; state.ws = ws; resolve(ws); };
       ws.onerror = function () { if (!opened) reject(new Error("WSS connect failed")); };
-      ws.onclose = function () { setStatus("disconnected", "err"); enableInput(false); };
+      // On idle disconnect keep the composer usable — the next send reconnects.
+      ws.onclose = function () {
+        state.ws = null;
+        setStatus("idle — send a message to reconnect", "");
+        enableInput(true);
+      };
       ws.onmessage = function (ev) {
         var frame;
         try { frame = JSON.parse(ev.data); } catch (e) { return; }
@@ -106,15 +125,32 @@
     });
   }
 
-  function sendMessage(text) {
-    if (!state.ws || state.ws.readyState !== 1) {
-      addMsg("⚠️ not connected", "note");
-      return;
-    }
-    addMsg(text, "me");
-    enableInput(false);
+  function deliver(text) {
     state.currentBot = null;
     state.ws.send(JSON.stringify({ type: "chat", actorId: state.actorId, message: text }));
+  }
+
+  function sendMessage(text) {
+    addMsg(text, "me");
+    enableInput(false);
+
+    if (state.ws && state.ws.readyState === 1) {
+      deliver(text);
+      return;
+    }
+    // Reconnect lazily: fresh presigned URL → new socket → then send.
+    setStatus("reconnecting…");
+    refreshSession()
+      .then(function (session) { return connectWs(session.wsUrl); })
+      .then(function () {
+        setStatus("connected as " + state.displayName, "ok");
+        deliver(text);
+      })
+      .catch(function (err) {
+        addMsg("⚠️ reconnect failed: " + err.message, "note");
+        setStatus("disconnected", "err");
+        enableInput(true);
+      });
   }
 
   elForm.addEventListener("submit", function (e) {
@@ -136,7 +172,7 @@
     getLarkCode()
       .then(authAndSession)
       .then(function (session) {
-        setStatus("connected as " + state.actorId, "ok");
+        setStatus("connected as " + state.displayName, "ok");
         return connectWs(session.wsUrl);
       })
       .then(function () { enableInput(true); addMsg("Connected. Say hello 👋", "note"); })

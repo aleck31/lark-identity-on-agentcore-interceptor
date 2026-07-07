@@ -120,7 +120,7 @@ def handle_lark_auth(event: dict) -> dict:
         # provision app-side identity (allowlist-gated) up front
         identity.resolve_user("lark", user["open_id"], user["name"])
         return _resp(200, {"idToken": id_token, "actorId": actor_id,
-                           "openId": user["open_id"]})
+                           "openId": user["open_id"], "name": user["name"]})
     except Exception as e:  # noqa: BLE001
         logger.exception("lark auth failed")
         return _resp(500, {"error": str(e)})
