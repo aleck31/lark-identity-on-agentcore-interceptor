@@ -150,6 +150,28 @@ JSON
       >/dev/null && echo "  demo-docs target created" || echo "(target create failed — check output)"
     rm -f "$docs_file"
   fi
+
+  # doc write tools (same Lambda) — create/edit/delete Lark docs AS the user.
+  if ! aws bedrock-agentcore-control list-gateway-targets --gateway-identifier "$gid" \
+       --query "items[?name=='demo-doc-write']" --output text 2>/dev/null | grep -q demo-doc-write; then
+    log "creating doc-write target"
+    local w_file; w_file="$(mktemp)"
+    cat > "$w_file" <<'JSON'
+{"mcp":{"lambda":{"lambdaArn":"__TOOL_ARN__","toolSchema":{"inlinePayload":[
+  {"name":"create_doc","description":"Create a new Lark doc owned by the calling user","inputSchema":{"type":"object","properties":{"title":{"type":"string","description":"document title"},"content":{"type":"string","description":"optional initial text content"}},"required":["title"]}},
+  {"name":"edit_doc","description":"Append text content to an existing Lark doc the user can edit","inputSchema":{"type":"object","properties":{"document_id":{"type":"string"},"content":{"type":"string"}},"required":["document_id","content"]}},
+  {"name":"delete_doc","description":"Delete a Lark doc/file the user owns (moves to trash)","inputSchema":{"type":"object","properties":{"document_id":{"type":"string","description":"file token"},"type":{"type":"string","description":"docx|file|sheet…, default docx"}},"required":["document_id"]}}
+]}}}}
+JSON
+    sed -i "s|__TOOL_ARN__|$tool|" "$w_file"
+    aws bedrock-agentcore-control create-gateway-target \
+      --gateway-identifier "$gid" \
+      --name demo-doc-write \
+      --target-configuration "file://$w_file" \
+      --credential-provider-configurations '[{"credentialProviderType":"GATEWAY_IAM_ROLE"}]' \
+      >/dev/null && echo "  demo-doc-write target created" || echo "(target create failed — check output)"
+    rm -f "$w_file"
+  fi
 }
 
 phase4_frontend() {

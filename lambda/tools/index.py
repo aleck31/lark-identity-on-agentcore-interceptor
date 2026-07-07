@@ -133,32 +133,49 @@ def _valid_user_token(open_id: str) -> str | None:
     return bundle.get("user_access_token")
 
 
-def _list_my_docs(ident: dict) -> dict:
+def _resolve_token(ident: dict):
+    """Return (open_id, user_access_token) for the caller, or (None, err_result)."""
     actor = ident["endUserId"]  # lark:{open_id}
     if not actor.startswith("lark:"):
-        return _result(f"cannot resolve a Lark user from identity '{actor}'", is_error=True)
+        return None, _result(f"cannot resolve a Lark user from identity '{actor}'", is_error=True)
     open_id = actor.split(":", 1)[1]
-
     token = _valid_user_token(open_id)
     if not token:
-        return _result(
+        return None, _result(
             "You haven't authorized document access yet (no user token on file). "
             "Open the web app in Lark and grant access, then try again."
         )
+    return (open_id, token), None
 
-    # Call the Lark drive API AS the user — results are exactly what this user
-    # can see in Lark. The agent never sees this token.
-    url = f"{_API_DOMAIN}/open-apis/drive/v1/files?page_size=20"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+
+def _lark(method: str, path: str, token: str, body: dict | None = None) -> tuple[dict | None, dict | None]:
+    """Call a Lark REST endpoint as the user. Returns (data, err_result)."""
+    url = f"{_API_DOMAIN}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    headers = {"Authorization": f"Bearer {token}"}
+    if body is not None:
+        headers["Content-Type"] = "application/json; charset=utf-8"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             resp = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
-        return _result(f"Lark drive API error {e.code}: {e.read().decode()[:200]}", is_error=True)
+        return None, _result(f"Lark API error {e.code}: {e.read().decode()[:200]}", is_error=True)
     if resp.get("code") != 0:
-        return _result(f"Lark drive API returned code {resp.get('code')}: {resp.get('msg')}", is_error=True)
+        return None, _result(f"Lark API code {resp.get('code')}: {resp.get('msg')}", is_error=True)
+    return resp.get("data", {}), None
 
-    files = resp.get("data", {}).get("files", [])
+
+def _list_my_docs(ident: dict, ev: dict) -> dict:
+    (ctx, err) = _resolve_token(ident)
+    if err:
+        return err
+    _, token = ctx
+    data, err = _lark("GET", "/open-apis/drive/v1/files?page_size=20", token)
+    if err:
+        return err
+    files = data.get("files", [])
+    actor = ident["endUserId"]
     if not files:
         return _result(f"{actor} has no files visible in their Lark drive root.")
     lines = [f"- {f.get('name')} ({f.get('type')}) — {f.get('url')}" for f in files[:20]]
@@ -168,9 +185,74 @@ def _list_my_docs(ident: dict) -> dict:
     )
 
 
+def _create_doc(ident: dict, ev: dict) -> dict:
+    (ctx, err) = _resolve_token(ident)
+    if err:
+        return err
+    _, token = ctx
+    title = (ev.get("title") or "Untitled").strip()
+    data, err = _lark("POST", "/open-apis/docx/v1/documents", token, {"title": title})
+    if err:
+        return err
+    doc = data.get("document", {})
+    doc_id = doc.get("document_id", "")
+    content = (ev.get("content") or "").strip()
+    if content and doc_id:
+        # Append one text block at the document root (block_id == document_id).
+        block = {"children": [{"block_type": 2, "text": {"elements": [
+            {"text_run": {"content": content}}]}}], "index": 0}
+        _, berr = _lark("POST", f"/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children",
+                        token, block)
+        if berr:
+            return _result(f"Created doc '{title}' (id {doc_id}) but failed to add content: "
+                           f"{berr['content'][0]['text']}", is_error=True)
+    return _result(f"Created Lark doc '{title}' (document_id: {doc_id}). It belongs to you "
+                   f"in your Lark space.")
+
+
+def _edit_doc(ident: dict, ev: dict) -> dict:
+    (ctx, err) = _resolve_token(ident)
+    if err:
+        return err
+    _, token = ctx
+    doc_id = (ev.get("document_id") or "").strip()
+    content = (ev.get("content") or "").strip()
+    if not doc_id or not content:
+        return _result("edit_doc needs 'document_id' and 'content'.", is_error=True)
+    block = {"children": [{"block_type": 2, "text": {"elements": [
+        {"text_run": {"content": content}}]}}], "index": 0}
+    _, err = _lark("POST", f"/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children",
+                   token, block)
+    if err:
+        return err
+    return _result(f"Appended content to doc {doc_id} (as you, subject to your Lark edit rights).")
+
+
+def _delete_doc(ident: dict, ev: dict) -> dict:
+    (ctx, err) = _resolve_token(ident)
+    if err:
+        return err
+    _, token = ctx
+    file_token = (ev.get("document_id") or ev.get("file_token") or "").strip()
+    ftype = (ev.get("type") or "docx").strip()
+    if not file_token:
+        return _result("delete_doc needs 'document_id' (the file token).", is_error=True)
+    _, err = _lark("DELETE", f"/open-apis/drive/v1/files/{file_token}?type={ftype}", token)
+    if err:
+        return err
+    return _result(f"Deleted {ftype} {file_token} (moved to your Lark trash). Only works if "
+                   f"you own it.")
+
+
 # ------------------------------- dispatch -----------------------------------
 
-_TOOLS = {"whoami": _whoami, "list_my_docs": _list_my_docs}
+_TOOLS = {
+    "whoami": lambda ident, ev: _whoami(ident),
+    "list_my_docs": _list_my_docs,
+    "create_doc": _create_doc,
+    "edit_doc": _edit_doc,
+    "delete_doc": _delete_doc,
+}
 
 
 def handler(event, context):
@@ -191,4 +273,4 @@ def handler(event, context):
     fn = _TOOLS.get(short)
     if not fn:
         return _result(f"unknown tool: {name}", is_error=True)
-    return fn(ident)
+    return fn(ident, ev)
