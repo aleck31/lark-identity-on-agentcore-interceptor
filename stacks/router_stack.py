@@ -76,6 +76,7 @@ class RouterStack(Stack):
             "RouterFn",
             function_name=fn_name,
             runtime=_lambda.Runtime.PYTHON_3_13,
+            architecture=_lambda.Architecture.ARM_64,  # matches aarch64 wheels bundled by uv
             handler="index.handler",
             code=lambda_asset("lambda/router"),
             timeout=Duration.seconds(timeout),
@@ -117,7 +118,12 @@ class RouterStack(Stack):
         # --- IAM ---
         self.router_fn.add_to_role_policy(
             iam.PolicyStatement(
-                actions=["bedrock-agentcore:InvokeAgentRuntime"],
+                # ForUser is required whenever the X-Amzn-...-Runtime-User-Id
+                # header is set (we pass runtimeUserId=actor_id).
+                actions=[
+                    "bedrock-agentcore:InvokeAgentRuntime",
+                    "bedrock-agentcore:InvokeAgentRuntimeForUser",
+                ],
                 resources=[runtime_arn, f"{runtime_arn}/*"],
             )
         )

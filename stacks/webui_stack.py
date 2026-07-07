@@ -95,7 +95,10 @@ class WebUiStack(Stack):
 
         # --- IAM for web_api ---
         self.web_api_fn.add_to_role_policy(iam.PolicyStatement(
-            actions=["bedrock-agentcore:InvokeAgentRuntime"],
+            actions=[
+                "bedrock-agentcore:InvokeAgentRuntime",
+                "bedrock-agentcore:InvokeAgentRuntimeForUser",
+            ],
             resources=[runtime_arn, f"{runtime_arn}/*"],
         ))
         # presign requires signing creds; the WSS connect is authorized by the

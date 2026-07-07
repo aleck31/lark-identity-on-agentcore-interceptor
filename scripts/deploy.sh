@@ -104,12 +104,12 @@ phase3_gateway() {
   grole="$(cfn_out "$PREFIX-gateway" GatewayRoleArn)"
 
   gid="$(aws bedrock-agentcore-control list-gateways \
-    --query "items[?name=='${PREFIX//-/_}_gw'].gatewayId" --output text 2>/dev/null || true)"
+    --query "items[?name=='${PREFIX}-gw'].gatewayId" --output text 2>/dev/null || true)"
 
   if [ -z "$gid" ] || [ "$gid" = "None" ]; then
     log "creating gateway"
     gid="$(aws bedrock-agentcore-control create-gateway \
-      --name "${PREFIX//-/_}_gw" \
+      --name "${PREFIX}-gw" \
       --protocol-type MCP \
       --role-arn "$grole" \
       --authorizer-type CUSTOM_JWT \
@@ -124,15 +124,22 @@ phase3_gateway() {
     --query gatewayUrl --output text 2>/dev/null || true)"
   [ -n "$gurl" ] && ctx_set gateway_url "$gurl"
 
-  # demo tool target (idempotent create)
+  # demo tool target (idempotent create). Pass JSON via file:// to avoid shell
+  # quote mangling of the nested schema.
   if ! aws bedrock-agentcore-control list-gateway-targets --gateway-identifier "$gid" \
-       --query "items[?name=='demo_whoami']" --output text 2>/dev/null | grep -q demo_whoami; then
+       --query "items[?name=='demo-whoami']" --output text 2>/dev/null | grep -q demo-whoami; then
     log "creating demo tool target"
+    local tgt_file; tgt_file="$(mktemp)"
+    cat > "$tgt_file" <<JSON
+{"mcp":{"lambda":{"lambdaArn":"$tool","toolSchema":{"inlinePayload":[{"name":"whoami","description":"Report the calling end-user identity injected by the gateway","inputSchema":{"type":"object","properties":{}}}]}}}}
+JSON
     aws bedrock-agentcore-control create-gateway-target \
       --gateway-identifier "$gid" \
-      --name demo_whoami \
-      --target-configuration "{\"mcp\":{\"lambda\":{\"lambdaArn\":\"$tool\",\"toolSchema\":{\"inlinePayload\":[{\"name\":\"whoami\",\"description\":\"Report the calling end-user identity injected by the gateway\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}}}" \
-      >/dev/null || echo "(target create returned non-zero — may already exist)"
+      --name demo-whoami \
+      --target-configuration "file://$tgt_file" \
+      --credential-provider-configurations '[{"credentialProviderType":"GATEWAY_IAM_ROLE"}]' \
+      >/dev/null && echo "  demo-whoami target created" || echo "(target create failed — check output)"
+    rm -f "$tgt_file"
   fi
 }
 
@@ -141,23 +148,21 @@ phase4_frontend() {
   # webui depends on runtime ARN (from runtime_id) — deploy now that it's set
   $CDK deploy "$PREFIX-webui" --require-approval never --outputs-file cdk.out/outputs.json
 
-  local api_base app_id bucket dist
+  local api_base app_id bucket
   api_base="$(cfn_out "$PREFIX-webui" ApiUrl)"
   bucket="$(cfn_out "$PREFIX-webui" SiteBucketName)"
-  app_id="$(aws secretsmanager get-secret-value --secret-id "$PREFIX/channels/lark" \
-    --query SecretString --output text 2>/dev/null | uv run python -c "import json,sys;print(json.load(sys.stdin).get('appId',''))" 2>/dev/null || echo "")"
+  # larkAppId comes from .env (single config source), not Secrets Manager.
+  [ -f .env ] && { set -a; . ./.env; set +a; }
+  app_id="${LARK_APP_ID:-}"
 
-  log "injecting SPA config (apiBase=$api_base)"
-  cat > web-ui/config.js <<JS
-window.LARK_AGENT_CONFIG = {
-  apiBase: "${api_base%/}",
-  larkAppId: "$app_id",
-};
-JS
+  log "rendering web-ui/config.js from template (apiBase=$api_base appId=${app_id:-<empty>})"
+  sed -e "s|REPLACE_API_BASE|${api_base%/}|" -e "s|REPLACE_LARK_APP_ID|${app_id}|" \
+    web-ui/config.js.example > web-ui/config.js
 
   log "uploading SPA to s3://$bucket"
+  # exclude the template + docs; config.js (generated) IS uploaded
   aws s3 sync web-ui/ "s3://$bucket/" --delete \
-    --exclude "*.md" --cache-control "no-cache"
+    --exclude "*.md" --exclude "*.example" --cache-control "no-cache"
 
   log "Done. Site: $(cfn_out "$PREFIX-webui" SiteUrl)"
   log "Webhook URL (register in Lark): $(cfn_out "$PREFIX-router" WebhookLarkUrl)"

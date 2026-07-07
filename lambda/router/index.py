@@ -80,17 +80,22 @@ def process_lark_event(body: str, headers: dict) -> None:
 
     header = event_data.get("header", {})
     event = event_data.get("event", {})
-    if header.get("event_type") != "im.message.receive_v1":
+    event_type = header.get("event_type")
+    logger.info("event_type=%s", event_type)
+    if event_type != "im.message.receive_v1":
+        logger.info("ignoring non-message event")
         return
 
     sender = event.get("sender", {})
     if sender.get("sender_type") != "user":
+        logger.info("ignoring non-user sender")
         return
     open_id = sender.get("sender_id", {}).get("open_id")
     message = event.get("message", {})
     chat_id = message.get("chat_id")
     msg_type = message.get("message_type")
     content_str = message.get("content", "{}")
+    logger.info("message from open_id=%s chat_id=%s type=%s", open_id, chat_id, msg_type)
     if not (open_id and chat_id):
         return
 
@@ -108,7 +113,9 @@ def process_lark_event(body: str, headers: dict) -> None:
 
     actor_id = f"lark:{open_id}"
     user_id, is_new = identity.resolve_user("lark", open_id)
+    logger.info("resolve_user -> user_id=%s is_new=%s", user_id, is_new)
     if user_id is None:
+        logger.info("user not allowed: %s", actor_id)
         lark.send_message(
             chat_id,
             f"You are not authorized yet. Your ID: {actor_id}. "
@@ -118,6 +125,7 @@ def process_lark_event(body: str, headers: dict) -> None:
 
     agent_message = text.strip() or "hi"
     session_id = identity.get_or_create_session(user_id)
+    logger.info("invoking agent: session=%s msg=%r", session_id, agent_message[:80])
     try:
         reply = invoke_agent(session_id, user_id, actor_id, agent_message)
     except Exception as e:  # noqa: BLE001
@@ -138,6 +146,7 @@ def _resp(status: int, body: dict) -> dict:
 def handler(event, context):
     # Async self-invocation path
     if event.get("_async_dispatch"):
+        logger.info("async dispatch: processing lark event")
         process_lark_event(event["body"], event.get("headers", {}))
         return {"ok": True}
 
@@ -145,6 +154,7 @@ def handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method", "")
     headers = event.get("headers", {}) or {}
     body = event.get("body", "") or ""
+    logger.info("webhook hit: method=%s path=%s bytes=%d", method, path, len(body))
 
     if path.endswith("/health"):
         return _resp(200, {"status": "ok"})

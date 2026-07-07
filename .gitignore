@@ -12,6 +12,7 @@ __pycache__/
 # Node / web-ui
 node_modules/
 web-ui/dist/
+web-ui/config.js
 .dev
 
 # AgentCore Starter Toolkit

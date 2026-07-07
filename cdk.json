@@ -1,8 +1,16 @@
 {
   "app": "uv run python app.py",
   "watch": {
-    "include": ["**"],
-    "exclude": [".dev/**", ".git/**", ".venv/**", "web-ui/node_modules/**", "cdk.out/**"]
+    "include": [
+      "**"
+    ],
+    "exclude": [
+      ".dev/**",
+      ".git/**",
+      ".venv/**",
+      "web-ui/node_modules/**",
+      "cdk.out/**"
+    ]
   },
   "context": {
     "account": "",
@@ -10,10 +18,10 @@
     "resource_prefix": "lark-agent",
     "default_model_id": "global.anthropic.claude-sonnet-5",
     "lark_api_domain": "https://open.larksuite.com",
-    "runtime_id": "",
+    "runtime_id": "lark_agent_agent-mw5fwNFHcd",
     "runtime_endpoint_id": "DEFAULT",
-    "gateway_id": "",
-    "gateway_url": "",
+    "gateway_id": "lark-agent-gw-gmgxrswkhe",
+    "gateway_url": "https://lark-agent-gw-gmgxrswkhe.gateway.bedrock-agentcore.us-west-2.amazonaws.com/mcp",
     "registration_open": false,
     "presigned_url_expires": 300,
     "session_idle_timeout": 1800,
