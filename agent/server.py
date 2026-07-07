@@ -3,7 +3,7 @@
 HTTP 8080 — the AgentCore Runtime contract:
   GET  /ping          -> {"status":"Healthy"}   (must respond within seconds)
   POST /invocations   -> action in {warmup, status, chat}
-      chat   : {action,actorId,message,email?,history?} -> {reply}
+      chat   : {action,actorId,message,email?} -> {reply}  (history via Memory)
       warmup : {action} -> {ready:true}
       status : {action} -> {ready, uptime}
 
@@ -63,12 +63,11 @@ async def handle_invocations(request: web.Request) -> web.Response:
         actor_id = payload.get("actorId") or payload.get("userId") or "anonymous"
         message = payload.get("message", "")
         email = payload.get("email", "")
-        history = payload.get("history") or []
         if not message:
             return web.json_response({"error": "message required"}, status=400)
         try:
             reply = await asyncio.get_event_loop().run_in_executor(
-                None, agent_core.run_chat, actor_id, message, email, history
+                None, agent_core.run_chat, actor_id, message, email
             )
             return web.json_response({"reply": reply})
         except Exception as e:

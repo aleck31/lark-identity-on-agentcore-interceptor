@@ -116,6 +116,24 @@ class AgentCoreStack(Stack):
             )
         )
 
+        # AgentCore Memory (STM) — conversation history read/write. Scoped to the
+        # project's memory resources (the toolkit creates <prefix>_..._mem-*).
+        self.execution_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "bedrock-agentcore:CreateEvent",
+                    "bedrock-agentcore:ListEvents",
+                    "bedrock-agentcore:GetEvent",
+                    "bedrock-agentcore:ListActors",
+                    "bedrock-agentcore:ListSessions",
+                    "bedrock-agentcore:RetrieveMemoryRecords",
+                ],
+                resources=[
+                    f"arn:aws:bedrock-agentcore:{region}:{account}:memory/*",
+                ],
+            )
+        )
+
         # ECR pull (agent image lives in the CDK assets repo).
         self.execution_role.add_to_policy(
             iam.PolicyStatement(
