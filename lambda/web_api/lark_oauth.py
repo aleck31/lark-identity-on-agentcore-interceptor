@@ -24,6 +24,7 @@ log = logging.getLogger("web_api.lark_oauth")
 _REGION = os.environ.get("AWS_REGION", "us-west-2")
 _SECRET_ID = os.environ.get("LARK_SECRET_ID", "")
 _API_DOMAIN = os.environ.get("LARK_API_DOMAIN", "https://open.larksuite.com").rstrip("/")
+_PREFIX = os.environ.get("RESOURCE_PREFIX", "lark-agent")
 
 _secrets = boto3.client("secretsmanager", region_name=_REGION)
 _creds_cache: dict | None = None
@@ -68,8 +69,35 @@ def _app_access_token() -> str:
     return _app_token_cache["token"]
 
 
+def _user_token_secret_id(open_id: str) -> str:
+    return f"{_PREFIX}/user-tokens/{open_id}"
+
+
+def _store_user_token(open_id: str, token_resp: dict) -> None:
+    """Persist the user's Lark token bundle so the agent can later act as this
+    user (identity/permission inheritance). refresh_token is single-use, so we
+    always overwrite with the newest values. Created on first login, updated on
+    every subsequent login/refresh."""
+    now = int(time.time())
+    bundle = {
+        "user_access_token": token_resp.get("access_token", ""),
+        "refresh_token": token_resp.get("refresh_token", ""),
+        "expires_at": now + int(token_resp.get("expires_in", 7200)),
+        "refresh_expires_at": now + int(token_resp.get("refresh_token_expires_in", 0) or 0),
+        "scope": token_resp.get("scope", ""),
+    }
+    sid = _user_token_secret_id(open_id)
+    payload = json.dumps(bundle)
+    try:
+        _secrets.put_secret_value(SecretId=sid, SecretString=payload)
+    except _secrets.exceptions.ResourceNotFoundException:
+        _secrets.create_secret(Name=sid, SecretString=payload,
+                               Description=f"Lark user token for {open_id}")
+
+
 def exchange_code(code: str) -> dict:
-    """Redeem a login code. Returns {open_id, union_id, email, name}."""
+    """Redeem a login code. Returns {open_id, union_id, email, name}, and stores
+    the user's Lark token bundle (for permission inheritance) keyed by open_id."""
     c = _creds()
     token_resp = _post_json(
         f"{_API_DOMAIN}/open-apis/authen/v2/oauth/token",
@@ -87,8 +115,16 @@ def exchange_code(code: str) -> dict:
     if info.get("code") != 0:
         raise RuntimeError(f"user_info error: {info}")
     data = info["data"]
+    open_id = data.get("open_id", "")
+
+    if open_id:
+        try:
+            _store_user_token(open_id, token_resp)
+        except Exception as e:  # noqa: BLE001 — don't fail login if storage hiccups
+            log.error("failed to store user token for %s: %s", open_id, e)
+
     return {
-        "open_id": data.get("open_id", ""),
+        "open_id": open_id,
         "union_id": data.get("union_id", ""),
         "email": data.get("email", data.get("enterprise_email", "")),
         "name": data.get("name", ""),

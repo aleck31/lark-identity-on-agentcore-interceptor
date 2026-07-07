@@ -89,6 +89,7 @@ class WebUiStack(Stack):
                 "COGNITO_PASSWORD_SECRET_ID": cognito_password_secret_name,
                 "REGISTRATION_OPEN": registration_open,
                 "PRESIGNED_URL_EXPIRES": presigned_expires,
+                "RESOURCE_PREFIX": prefix,
             },
             log_group=log_group,
         )
@@ -109,6 +110,15 @@ class WebUiStack(Stack):
         self.web_api_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
             resources=[f"arn:aws:secretsmanager:{region}:{account}:secret:{prefix}/*"],
+        ))
+        # Store per-user Lark tokens (permission inheritance) under user-tokens/*.
+        # CreateSecret can't be resource-scoped; Put/Tag are scoped to the path.
+        self.web_api_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:CreateSecret"], resources=["*"],
+        ))
+        self.web_api_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:PutSecretValue", "secretsmanager:TagResource"],
+            resources=[f"arn:aws:secretsmanager:{region}:{account}:secret:{prefix}/user-tokens/*"],
         ))
         self.web_api_fn.add_to_role_policy(iam.PolicyStatement(
             actions=[

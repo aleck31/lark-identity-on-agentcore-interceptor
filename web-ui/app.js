@@ -51,7 +51,18 @@
       window.h5sdk.ready(function () {
         window.tt.requestAccess({
           appID: cfg.larkAppId,
-          scopeList: [],
+          // Scopes the user consents to; the resulting user_access_token can only
+          // reach these, further narrowed by the user's own Lark permissions.
+          // Must already be granted to the app in the Lark console. offline_access
+          // yields a refresh_token (user_access_token lives only ~2h).
+          // Must match the app's User Token Scopes in the Lark console exactly,
+          // or requestAccess fails with 20027. Read-write here (create/edit docs
+          // + manage drive files) per the configured scopes.
+          scopeList: cfg.scopeList || [
+            "drive:drive",       // view/comment/edit/manage My Space files
+            "docx:document",     // create and edit docx
+            "offline_access",    // refresh_token for token renewal
+          ],
           success: function (res) { resolve(res.code); },
           fail: function (err) { reject(new Error("requestAccess failed: " + JSON.stringify(err))); },
         });

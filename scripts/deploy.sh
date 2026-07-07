@@ -132,6 +132,24 @@ JSON
       >/dev/null && echo "  demo-whoami target created" || echo "(target create failed — check output)"
     rm -f "$tgt_file"
   fi
+
+  # list_my_docs target (same Lambda) — proves permission inheritance: lists the
+  # calling user's Lark docs, scoped to that user's own Lark permissions.
+  if ! aws bedrock-agentcore-control list-gateway-targets --gateway-identifier "$gid" \
+       --query "items[?name=='demo-docs']" --output text 2>/dev/null | grep -q demo-docs; then
+    log "creating list_my_docs target"
+    local docs_file; docs_file="$(mktemp)"
+    cat > "$docs_file" <<JSON
+{"mcp":{"lambda":{"lambdaArn":"$tool","toolSchema":{"inlinePayload":[{"name":"list_my_docs","description":"List the calling user's Lark cloud documents, scoped to that user's own Lark permissions (the agent never holds the user's token)","inputSchema":{"type":"object","properties":{}}}]}}}}
+JSON
+    aws bedrock-agentcore-control create-gateway-target \
+      --gateway-identifier "$gid" \
+      --name demo-docs \
+      --target-configuration "file://$docs_file" \
+      --credential-provider-configurations '[{"credentialProviderType":"GATEWAY_IAM_ROLE"}]' \
+      >/dev/null && echo "  demo-docs target created" || echo "(target create failed — check output)"
+    rm -f "$docs_file"
+  fi
 }
 
 phase4_frontend() {

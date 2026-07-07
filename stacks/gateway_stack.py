@@ -82,6 +82,7 @@ class GatewayStack(Stack):
             retention=retention_days(log_retention),
             removal_policy=RemovalPolicy.DESTROY,
         )
+        lark_api_domain = self.node.try_get_context("lark_api_domain") or "https://open.larksuite.com"
         self.tool_fn = _lambda.Function(
             self, "ToolFn",
             function_name=f"{prefix}-demo-tool",
@@ -90,6 +91,11 @@ class GatewayStack(Stack):
             code=_lambda.Code.from_asset("lambda/tools"),
             timeout=Duration.seconds(15),
             memory_size=256,
+            environment={
+                "RESOURCE_PREFIX": prefix,
+                "LARK_API_DOMAIN": lark_api_domain,
+                "LARK_SECRET_ID": f"{prefix}/channels/lark",
+            },
             log_group=tool_log,
         )
         self.tool_fn.add_permission(
@@ -98,6 +104,19 @@ class GatewayStack(Stack):
             action="lambda:InvokeFunction",
             source_arn=gateway_source_arn,
         )
+        # list_my_docs acts as the end-user: read their Lark token + app creds,
+        # and refresh (PutSecretValue) when the user_access_token expires.
+        self.tool_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[
+                f"arn:aws:secretsmanager:{region}:{account}:secret:{prefix}/user-tokens/*",
+                f"arn:aws:secretsmanager:{region}:{account}:secret:{prefix}/channels/lark-*",
+            ],
+        ))
+        self.tool_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:PutSecretValue"],
+            resources=[f"arn:aws:secretsmanager:{region}:{account}:secret:{prefix}/user-tokens/*"],
+        ))
 
         # --- Gateway service role (assumed by the Gateway to call the target) ---
         self.gateway_role = iam.Role(
