@@ -88,10 +88,15 @@ def handler(event, context):
         "Content-Type": "application/json",
         # downstream credential injected by the gateway, not held by the agent
         "Authorization": f"Bearer {key}" if key else "",
-        # forward the verified end-user identity to the tool
-        "X-End-User-Id": actor_id,
-        "X-End-User-Tenant": tenant,
     }
+
+    # Lambda targets only receive the Authorization header (via clientContext
+    # propagated headers) — custom headers are dropped. So forward the verified
+    # end-user identity in the tools/call arguments (the Lambda target's event).
+    if isinstance(body, dict) and body.get("method") == "tools/call":
+        args = body.setdefault("params", {}).setdefault("arguments", {})
+        args["_endUserId"] = actor_id
+        args["_endUserTenant"] = tenant
 
     logger.info("interceptor: actor=%s tenant=%s key=%s", actor_id, tenant, "set" if key else "none")
 

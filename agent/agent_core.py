@@ -46,7 +46,7 @@ def _run_tool_loop(messages: list[dict], jwt: str) -> list[dict]:
             modelId=_MODEL_ID,
             messages=messages,
             system=[{"text": _SYSTEM}],
-            inferenceConfig={"maxTokens": 2048, "temperature": 0.3},
+            inferenceConfig={"maxTokens": 4096},
         )
         if tool_config:
             kwargs["toolConfig"] = tool_config
@@ -114,7 +114,7 @@ def stream_chat(actor_id: str, message: str, email: str = "", history: list[dict
         modelId=_MODEL_ID,
         messages=messages,
         system=[{"text": _SYSTEM}],
-        inferenceConfig={"maxTokens": 2048, "temperature": 0.3},
+        inferenceConfig={"maxTokens": 4096},
     )
     for event in resp["stream"]:
         if "contentBlockDelta" in event:

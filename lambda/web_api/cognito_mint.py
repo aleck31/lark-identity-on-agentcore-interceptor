@@ -49,7 +49,7 @@ def _ensure_user(username: str, email: str) -> None:
             raise
         _cognito.admin_create_user(
             UserPoolId=_USER_POOL_ID, Username=username,
-            UserAttributes=[{"Name": "email", "Value": email or f"{username}@lark.local"},
+            UserAttributes=[{"Name": "email", "Value": email or f"{username.replace(':', '-')}@lark.local"},
                             {"Name": "email_verified", "Value": "true"}],
             MessageAction="SUPPRESS",
         )

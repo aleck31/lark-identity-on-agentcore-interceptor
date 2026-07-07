@@ -73,7 +73,10 @@ async def handle_invocations(request: web.Request) -> web.Response:
             return web.json_response({"reply": reply})
         except Exception as e:
             log.exception("chat failed")
-            return web.json_response({"error": str(e)}, status=500)
+            # Return 200: AgentCore wraps non-2xx as RuntimeClientError and drops
+            # the body, hiding the real error from callers. The Router surfaces
+            # the error field instead.
+            return web.json_response({"error": str(e)})
 
     return web.json_response({"error": f"unknown action: {action}"}, status=400)
 

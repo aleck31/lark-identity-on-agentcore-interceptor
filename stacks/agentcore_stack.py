@@ -127,6 +127,8 @@ class AgentCoreStack(Stack):
                 resources=[
                     f"arn:aws:ecr:{region}:{account}:repository/cdk-*",
                     f"arn:aws:ecr:{region}:{account}:repository/{prefix}-*",
+                    # Starter Toolkit pushes to repos named bedrock-agentcore-<agent>
+                    f"arn:aws:ecr:{region}:{account}:repository/bedrock-agentcore-*",
                 ],
             )
         )

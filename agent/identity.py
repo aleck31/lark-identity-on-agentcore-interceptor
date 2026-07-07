@@ -61,7 +61,9 @@ def _ensure_user(username: str, email: str = "") -> None:
     except ClientError as e:
         if e.response["Error"]["Code"] != "UserNotFoundException":
             raise
-    attrs = [{"Name": "email", "Value": email or f"{username}@lark.local"},
+    # username is "lark:ou_xxx" — colon is invalid in an email local part
+    safe_local = username.replace(":", "-")
+    attrs = [{"Name": "email", "Value": email or f"{safe_local}@lark.local"},
              {"Name": "email_verified", "Value": "true"}]
     _cognito.admin_create_user(
         UserPoolId=_USER_POOL_ID,
@@ -124,6 +126,10 @@ def get_user_jwt(username: str, email: str = "") -> str:
         else:
             raise
 
-    id_token = resp["AuthenticationResult"]["IdToken"]
-    _token_cache[username] = (id_token, _jwt_exp(id_token))
-    return id_token
+    # Use the ACCESS token: the Gateway's allowedClients check validates the
+    # `client_id` claim, which only access tokens carry (ID tokens have `aud`
+    # and would fail with insufficient_scope). The interceptor reads identity
+    # from the access token's `username` claim.
+    token = resp["AuthenticationResult"]["AccessToken"]
+    _token_cache[username] = (token, _jwt_exp(token))
+    return token

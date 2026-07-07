@@ -52,9 +52,28 @@ def _extract_identity(event: dict) -> dict:
 
 
 def handler(event, context):
-    logger.info("tool invoked: name=%s event=%s", _tool_name(context), json.dumps(event)[:500])
+    cc_custom = {}
+    try:
+        if context.client_context and context.client_context.custom:
+            cc_custom = dict(context.client_context.custom)
+    except Exception:
+        pass
+    logger.info("tool invoked: name=%s event=%s clientContext=%s",
+                _tool_name(context), json.dumps(event)[:300], json.dumps(cc_custom)[:500])
 
     ident = _extract_identity(event if isinstance(event, dict) else {})
+    # The interceptor forwards identity inside the tool arguments (Lambda
+    # targets receive tools/call arguments as the event; custom headers are
+    # dropped). The injected Authorization survives via clientContext
+    # bedrockAgentCorePropagatedHeaders.
+    if ident["endUserId"] == "unknown" and isinstance(event, dict):
+        propagated = {k.lower(): v for k, v in
+                      (cc_custom.get("bedrockAgentCorePropagatedHeaders") or {}).items()}
+        ident = {
+            "endUserId": event.get("_endUserId", "unknown"),
+            "endUserTenant": event.get("_endUserTenant", "unknown"),
+            "authorizationReceived": bool(propagated.get("authorization")),
+        }
     result_text = (
         f"whoami: you are '{ident['endUserId']}' (tenant '{ident['endUserTenant']}'). "
         f"The gateway injected a downstream credential: {ident['authorizationReceived']}. "
