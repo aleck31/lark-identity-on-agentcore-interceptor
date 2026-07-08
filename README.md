@@ -1,8 +1,8 @@
-# Lark Identity on AgentCore — Reference Implementation
+# Lark Identity on AgentCore — Gateway Interceptor
 
-A reference implementation of enterprise identity on Amazon Bedrock AgentCore, using **Lark (Feishu) as the identity provider**. A simple agent is reachable from **two Lark entrypoints** — chat messages and a desktop-client-embedded web UI — that both resolve to the same `lark:{open_id}` identity, and each end-user's identity is **forwarded to downstream MCP tools** through an AgentCore Gateway Request Interceptor (the agent itself never holds the downstream credential).
+A reference implementation of enterprise identity on Amazon Bedrock AgentCore, using **Lark (Feishu) as the identity provider**. A simple agent is reachable from **two Lark entrypoints** — chat messages and a desktop-client-embedded web UI — that both resolve to the same `lark:{open_id}` identity. That identity is **forwarded to downstream MCP tools** through an AgentCore Gateway Request Interceptor (the agent never holds a downstream credential), and the tools then **act as the user against Lark** with the user's own token, so they reach only what that user can — Lark itself decides. In short, the agent inherits both *who you are* and *what you're allowed to do*, adding nothing of its own.
 
-> Resources are prefixed `lark-agent-*` in code (the original project name); the repository is `lark-identity-on-agentcore`.
+This is the **Gateway Interceptor** variant (downstream tools are Lambda targets; a custom interceptor forwards identity and injects the per-user credential).
 
 ## Architecture
 
@@ -118,6 +118,7 @@ All four goals verified end-to-end on an AWS account:
 - ✅ **Desktop embed**: opening the Web app inside the Lark client runs h5sdk 免登 → `POST /api/lark/auth` (code → Cognito JWT) → `POST /api/session`
   (presigned WSS) → the AgentCore platform bridges the browser's WSS to the
   agent's `/ws` on port 8080 → streaming reply. Shows the user's display name.
+  The minted JWT is cached in `sessionStorage`, so a refresh reuses it and skips `requestAccess` — otherwise Lark re-prompts the consent popup on every load (it has no silent login-state reuse; the SPA must do it).
 - ✅ **Unified identity**: both entrypoints resolve to the same `lark:{open_id}` (session/workspace shared).
 - ✅ **MCP identity pass-through**: the agent mints the user's Cognito **access** token → AgentCore Gateway (`customJWTAuthorizer`) → Request Interceptor reads
   the identity and injects the per-tenant downstream key → the `whoami` tool reports the real end-user id and that a credential was injected, **while the agent never holds the key**.

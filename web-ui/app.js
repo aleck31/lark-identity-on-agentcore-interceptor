@@ -24,6 +24,35 @@
 
   var state = { idToken: null, actorId: null, displayName: null, ws: null, currentBot: null, botRaw: "" };
 
+  // Login-state cache (sessionStorage). Lark's requestAccess re-prompts every time the page calls it, 
+  // so we cache the minted JWT and reuse it across refreshes — only re-authenticating (which re-triggers the Lark consent popup) 
+  // when there is no valid token. The JWT's own `exp` claim decides validity.
+  var AUTH_KEY = "larkAgentAuth";
+  function jwtExpMs(tok) {
+    try {
+      var p = JSON.parse(atob(tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      return (p.exp || 0) * 1000;
+    } catch (e) { return 0; }
+  }
+  function saveAuth(auth) {
+    try {
+      sessionStorage.setItem(AUTH_KEY, JSON.stringify({
+        idToken: auth.idToken, actorId: auth.actorId,
+        name: auth.name || auth.actorId, exp: jwtExpMs(auth.idToken),
+      }));
+    } catch (e) { /* private mode / quota — fall back to in-memory only */ }
+  }
+  function loadAuth() {
+    try {
+      var a = JSON.parse(sessionStorage.getItem(AUTH_KEY) || "null");
+      // 60s skew so we never hand a token that expires mid-request.
+      if (a && a.idToken && a.exp - 60000 > nowMs()) return a;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function clearAuth() { try { sessionStorage.removeItem(AUTH_KEY); } catch (e) { /* ignore */ } }
+  function nowMs() { return new Date().getTime(); }
+
   function setStatus(text, cls) {
     elStatus.textContent = text;
     elStatus.className = "status" + (cls ? " " + cls : "");
@@ -47,7 +76,15 @@
   function enableInput(on) {
     elInput.disabled = !on;
     elSend.disabled = !on;
-    if (on) elInput.focus();
+    if (on) { setWaiting(false); elInput.focus(); }
+  }
+
+  // Waiting state: the composer is disabled while the agent works, so make it
+  // explicit this is "awaiting a reply" (not a broken/frozen UI). A CSS spinner
+  // replaces the button label in place (fixed width, no reflow); status echoes it.
+  function setWaiting(on) {
+    elSend.classList.toggle("waiting", on);
+    if (on) setStatus("agent is thinking…", "");
   }
 
   // --- step 1: get a Lark login code -------------------------------------
@@ -96,8 +133,19 @@
         state.idToken = auth.idToken;
         state.actorId = auth.actorId;
         state.displayName = auth.name || auth.actorId;
+        saveAuth(auth);   // cache so a refresh reuses it and skips the Lark popup
         return auth;
       });
+  }
+
+  // Reuse a cached, still-valid JWT (no Lark popup) or fall back to full auth.
+  function ensureAuth() {
+    var a = loadAuth();
+    if (!a) return authenticate();
+    state.idToken = a.idToken;
+    state.actorId = a.actorId;
+    state.displayName = a.name;
+    return Promise.resolve(a);
   }
 
   // --- step 3: create/refresh a session (WSS URL) ------------------------
@@ -117,7 +165,8 @@
       method: "GET", headers: { Authorization: "Bearer " + state.idToken },
     }).then(function (r) {
       if (r.status === 401) {
-        return authenticate().then(createSession);  // token expired → re-login
+        clearAuth();                                 // stale cached token → drop it
+        return authenticate().then(createSession);   // re-login (may re-prompt)
       }
       if (!r.ok) throw new Error("session refresh failed " + r.status);
       return r.json();
@@ -134,14 +183,17 @@
       // On idle disconnect keep the composer usable — the next send reconnects.
       ws.onclose = function () {
         state.ws = null;
-        setStatus("idle — send a message to reconnect", "");
+        setStatus("idle 💤", "");
         enableInput(true);
       };
       ws.onmessage = function (ev) {
         var frame;
         try { frame = JSON.parse(ev.data); } catch (e) { return; }
         if (frame.type === "delta") {
-          if (!state.currentBot) { state.currentBot = addMsg("", "bot"); state.botRaw = ""; }
+          if (!state.currentBot) {
+            state.currentBot = addMsg("", "bot"); state.botRaw = "";
+            setStatus("replying…", "");   // first token arrived — agent is streaming
+          }
           state.botRaw += frame.text;
           // Re-render the accumulated markdown each delta (plain-text fallback inside).
           if (state.currentBot.classList.contains("md")) renderMarkdown(state.currentBot, state.botRaw);
@@ -150,6 +202,7 @@
         } else if (frame.type === "final") {
           state.currentBot = null;
           enableInput(true);
+          setStatus("connected as " + state.displayName, "ok");
         } else if (frame.type === "error") {
           addMsg("⚠️ " + frame.message, "note");
           state.currentBot = null;
@@ -167,6 +220,7 @@
   function sendMessage(text) {
     addMsg(text, "me");
     enableInput(false);
+    setWaiting(true);
 
     if (state.ws && state.ws.readyState === 1) {
       deliver(text);
@@ -203,7 +257,7 @@
       return;
     }
     setStatus("authenticating…");
-    authenticate()
+    ensureAuth()
       .then(createSession)
       .then(function (session) {
         setStatus("connected as " + state.displayName, "ok");

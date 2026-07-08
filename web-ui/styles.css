@@ -60,3 +60,17 @@ header h1 { font-size: 16px; margin: 0; font-weight: 600; }
 .composer button { padding: 10px 18px; border: 0; border-radius: 10px;
   background: var(--accent); color: #fff; font-size: 14px; cursor: pointer; }
 .composer button:disabled { opacity: 0.5; cursor: default; }
+
+/* Waiting for the agent: keep the button visibly "active" (not just greyed) so a
+   disabled composer reads as "awaiting a reply", not broken. Show a spinner in
+   place of the label — the button keeps its size, so nothing shifts. */
+.composer button { min-width: 76px; }   /* fixed width so label↔spinner doesn't reflow */
+.composer button.waiting { opacity: 1; cursor: progress; color: transparent; }
+.composer button.waiting::after {
+  content: ""; position: absolute; width: 15px; height: 15px; margin: -8px 0 0 -8px;
+  top: 50%; left: 50%; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff;
+  animation: spin 0.6s linear infinite;
+}
+.composer button { position: relative; }
+@keyframes spin { to { transform: rotate(360deg); } }

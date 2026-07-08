@@ -16,7 +16,7 @@ Every entrypoint resolves to the same stable identity `lark:{open_id}`, and that
 | AgentCore Gateway | An MCP server with a Cognito JWT authorizer + a Request Interceptor | created by `scripts/deploy.sh` (control-plane CLI) |
 | Interceptor Lambda | Reads identity from the verified JWT, injects it (and a per-tenant downstream key) into the tool call | `lambda/interceptor/` |
 | Tool Lambda | MCP tool targets behind the Gateway: `whoami` (identity proof) and `list_my_docs` (acts as the user against Lark) | `lambda/tools/` |
-| Web SPA | Lark-embedded UI: h5sdk 免登 → JWT → streaming chat over WSS | `web-ui/` |
+| Web SPA | Lark-embedded UI: h5sdk 免登 → JWT (cached in sessionStorage) → streaming chat over WSS | `web-ui/` |
 | Cognito user pool | Token factory: mints a standard OIDC JWT for a Lark-authenticated user (Lark is not standard OIDC) | `stacks/security_stack.py` |
 | AgentCore Memory | Per-user short-term memory (conversation history), keyed by `(actor_id, session)` | `lark_agent_agent_mem` (STM) |
 
@@ -111,7 +111,8 @@ sequenceDiagram
     participant L as Lark REST API
 
     U->>SPA: open web app
-    SPA->>U: requestAccess (consent)
+    Note over SPA: reuse a cached valid JWT (sessionStorage) and skip the popup — else requestAccess
+    SPA->>U: requestAccess (consent, first time only)
     U-->>SPA: login code
     SPA->>W: POST /api/lark/auth (code)
     W->>L: exchange code
