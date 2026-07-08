@@ -171,17 +171,31 @@ def _list_my_docs(ident: dict, ev: dict) -> dict:
     if err:
         return err
     _, token = ctx
-    data, err = _lark("GET", "/open-apis/drive/v1/files?page_size=20", token)
+    # Lark's list-files API returns ONE folder level (not recursive). Pass
+    # folder_token to descend into a subfolder; omit it for the drive root.
+    folder = (ev.get("folder_token") or "").strip()
+    q = "/open-apis/drive/v1/files?page_size=50"
+    if folder:
+        q += f"&folder_token={folder}"
+    data, err = _lark("GET", q, token)
     if err:
         return err
     files = data.get("files", [])
     actor = ident["endUserId"]
+    where = f"folder {folder}" if folder else "their Lark drive root"
     if not files:
-        return _result(f"{actor} has no files visible in their Lark drive root.")
-    lines = [f"- {f.get('name')} ({f.get('type')}) — {f.get('url')}" for f in files[:20]]
+        return _result(f"{actor} has no files in {where}.")
+    # Surface each folder's token so the agent can drill into it on a follow-up call.
+    lines = []
+    for f in files[:50]:
+        tok = f.get("token", "")
+        if f.get("type") == "folder":
+            lines.append(f"- 📁 {f.get('name')} (folder, folder_token={tok}) — {f.get('url')}")
+        else:
+            lines.append(f"- {f.get('name')} ({f.get('type')}, token={tok}) — {f.get('url')}")
     return _result(
-        f"Documents {actor} can access in Lark (scoped to this user's own "
-        f"permissions, {len(files)} shown):\n" + "\n".join(lines)
+        f"Contents of {where} that {actor} can access (this level only, {len(files)} "
+        f"shown; call again with a folder_token to go deeper):\n" + "\n".join(lines)
     )
 
 

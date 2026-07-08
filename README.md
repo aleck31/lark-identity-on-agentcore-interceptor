@@ -30,8 +30,8 @@ A reference implementation of enterprise identity on Amazon Bedrock AgentCore, u
                              └─────────┬─────────┘  (Gateway invokes its Lambda target, not Lark)
                                        ▼
                              ┌───────────────────┐  whoami — identity proof
-                             │   Tool Lambda     │  list_my_docs — loads THIS user's Lark
-                             └─────────┬─────────┘  user_access_token (Secrets Manager, by open_id)
+                             │   Tool Lambda     │  list_my_docs / create / edit / delete — act AS the
+                             └─────────┬─────────┘  user with THIS user's Lark user_access_token (by open_id)
                                        │ HTTPS, Bearer = user_access_token
                                        ▼
                                   Lark REST API  → returns only what THIS user can see
@@ -54,8 +54,8 @@ See **[docs/architecture.md](docs/architecture.md)** for the full layered design
 | `lambda/router/` | Lark webhook: verify/decrypt/tenant-token/send |
 | `lambda/web_api/` | Lark login exchange + session bootstrap (presigned WSS) |
 | `lambda/interceptor/` | Gateway Request Interceptor (per-user credential injection) |
-| `lambda/tools/` | MCP tool targets: `whoami` (identity proof) + `list_my_docs` (acts as the user against Lark) |
-| `web-ui/` | Lark-embedded SPA (no build step) |
+| `lambda/tools/` | MCP tool targets: `whoami` (identity proof) + `list_my_docs`/`create_doc`/`edit_doc`/`delete_doc` (all act as the user against Lark) |
+| `web-ui/` | Lark-embedded SPA (no build step; renders agent replies as Markdown via marked + DOMPurify) |
 | `scripts/` | deploy / setup-lark / manage-allowlist / test |
 | `docs/architecture.md` | Full architecture: layers, per-hop auth, sequence diagrams |
 
@@ -91,6 +91,9 @@ The webhook/SPA URLs come from `deploy.sh` output. In the Lark developer console
    - **`im:message.p2p_msg:readonly`** ← required for **single-chat** messages
    - `im:message:send_as_bot` (reply), `im:resource` (images)
    - `contact:user.base:readonly` (login → open_id)
+
+   For **permission inheritance** (the doc tools act as the user), also add these under the **User Token Scopes** tab — they are user-identity scopes and usually need **admin approval** before they take effect; the web app's `tt.requestAccess` `scopeList` must match them exactly or it fails with **20027**:
+   - `drive:drive` (list/create/manage the user's Drive files), `docx:document` (create/edit docx), `offline_access` (refresh_token — the user_access_token lives only ~2h)
 3. **Events & Callbacks**: subscription mode = *Send to developer's server*; set Request URL to the webhook URL; enable **Encryption** (note the Encrypt Key); add event **`im.message.receive_v1`**.
 4. **Security Settings**: add the SPA URL to **Redirect URLs** and **H5 trusted domains**. Leave IP allowlist empty (Lambda egress IPs are dynamic).
 5. **Web app**: set Desktop + Mobile homepage to the SPA URL.
@@ -120,7 +123,8 @@ All four goals verified end-to-end on an AWS account:
   the identity and injects the per-tenant downstream key → the `whoami` tool reports the real end-user id and that a credential was injected, **while the agent never holds the key**.
 - ✅ **Conversation memory**: the agent is a Strands agent with an AgentCore Memory (STM) session manager keyed by `(actor_id, session)`.
   Verified across two *different* runtime sessions for the same user: it recalls a fact stated earlier — so memory persists across reconnects and both entrypoints (30-day event retention).
-- ✅ **Permission inheritance**: after the user authorizes in the web app, the `list_my_docs` tool acts *as* that user — it loads the user's Lark `user_access_token` (stored by open_id, refreshed on expiry) and calls the Lark drive API, returning **only the documents that user can see in Lark**. Verified end-to-end: the agent returned the user's real Lark folder, scoped by Lark's own permission check, while never holding the user's Lark token.
+- ✅ **Permission inheritance**: after the user authorizes in the web app, the doc tools act *as* that user — each loads the user's Lark `user_access_token` (stored by open_id, refreshed on expiry) and calls the Lark API, so access is **scoped to what that user can see/do in Lark**, adjudicated by Lark, and the agent never holds the token. Verified end-to-end: `list_my_docs` returned the user's real folder and, given a `folder_token`, descended into it to list the nested docs; `create_doc`/`edit_doc`/`delete_doc` created a doc (real document_id), appended content, and trashed it — all as the user.
+- ✅ **Markdown rendering**: agent replies (bold, lists, tables, code) render as sanitized HTML in the web chat — `marked` parses, `DOMPurify` strips anything unsafe (agent output is untrusted); streaming re-renders each delta; plain-text fallback if the CDN scripts fail.
 
 ### Build & deploy notes (learned the hard way)
 

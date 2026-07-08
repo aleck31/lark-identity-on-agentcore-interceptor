@@ -140,7 +140,7 @@ JSON
     log "creating list_my_docs target"
     local docs_file; docs_file="$(mktemp)"
     cat > "$docs_file" <<JSON
-{"mcp":{"lambda":{"lambdaArn":"$tool","toolSchema":{"inlinePayload":[{"name":"list_my_docs","description":"List the calling user's Lark cloud documents, scoped to that user's own Lark permissions (the agent never holds the user's token)","inputSchema":{"type":"object","properties":{}}}]}}}}
+{"mcp":{"lambda":{"lambdaArn":"$tool","toolSchema":{"inlinePayload":[{"name":"list_my_docs","description":"List the calling user's Lark cloud documents, scoped to that user's own Lark permissions (the agent never holds the user's token). Returns one folder level; pass folder_token (from a folder entry in a prior result) to descend into a subfolder","inputSchema":{"type":"object","properties":{"folder_token":{"type":"string","description":"optional; a folder's token to list its contents. Omit for the drive root"}}}}]}}}}
 JSON
     aws bedrock-agentcore-control create-gateway-target \
       --gateway-identifier "$gid" \
