@@ -81,6 +81,15 @@ Config in `cdk.json`: `default_model_id` (`global.anthropic.claude-sonnet-5`),
 `lark_api_domain` (`https://open.larksuite.com` international / `open.feishu.cn`),
 `registration_open` (false = allowlist only), `presigned_url_expires`.
 
+### Tear down
+
+```bash
+scripts/destroy.sh            # delete everything deploy.sh created (asks for confirmation)
+# or: scripts/destroy.sh --yes  # skip the prompt
+```
+
+Deletes in dependency order — Gateway targets → Gateway → Runtime (all CLI-created, so `cdk destroy` alone can't remove them) → the six CDK stacks → the dynamic per-user token secrets (`{prefix}/user-tokens/*`, created at runtime and not owned by any stack). Idempotent: re-running skips already-gone resources. Your Lark console app config is **not** touched; re-seed credentials from `.env` via `scripts/setup-lark.sh` on the next deploy.
+
 ## Lark console setup (do this once, in order)
 
 The webhook/SPA URLs come from `deploy.sh` output. In the Lark developer console:
